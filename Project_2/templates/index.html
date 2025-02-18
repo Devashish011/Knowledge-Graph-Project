@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Visualization</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.24.0/cytoscape.min.js"></script>
+	 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-dagre/2.3.2/cytoscape-dagre.min.js"></script>
+	 <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre/cytoscape-dagre.js"></script>
+	 
+    <style>
+        #container {
+            display: flex;
+            width: 100%;
+            height: 75vh;
+        }
+        #cy {
+            flex: 3;
+            border: 1px solid #ccc;
+        }
+        #details {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            overflow-y: auto;
+        }
+        #details h3 {
+            margin-top: 0;
+        }
+        #csvFiles {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+			background: #f9f9f9;
+        }
+        #weightForm {
+            position: absolute;
+            background: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            z-index: 1000;
+			box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+		.page-container {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+    }
+    
+    .top-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px;
+    }
+    
+    .button-group {
+        display: flex;
+        gap: 10px;
+    }
+    
+    #container {
+        flex: 1;
+        margin-bottom: 20px;
+    }
+    
+   .table-section {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f9f9f9;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#graphTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#graphTable th {
+    background-color: #0074D9;
+    color: white;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+}
+
+#graphTable td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+#graphTable tr:hover {
+    background-color: #f5f5f5;
+}
+
+#graphTable tbody tr:last-child td {
+    border-bottom: none;
+}
+    </style>
+</head>
+<body>
+    <h1>Graph Visualization</h1>
+    <div class="page-container">
+    <div class="top-controls">
+        <div>
+            <input type="text" id="searchBox" placeholder="Enter search term">
+            <button id="searchButton">Search</button>
+            <label>Node 1:</label>
+            <input type="text" id="node1Input" placeholder="Enter first node">
+            <label>Node 2:</label>
+            <input type="text" id="node2Input" placeholder="Enter second node">
+            <button id="findPathButton">Find Path</button>
+        </div>
+        <div class="button-group">
+            <button id="loadMoreButton" disabled>Load More</button>
+            <button id="uploadButton">Upload</button>
+        </div>
+    </div>
+
+
+	  <div id="container">
+        <div id="cy"></div>
+        <div id="details">
+            <h3>Node Details</h3>
+            <div id="nodeDetails">Hover over a node to see its details.</div>
+        </div>
+    </div>
+       <div class="table-section">
+        <table id="graphTable" border="1">
+            <thead>
+                <tr>
+                    <th>Start Node</th>
+					<th>Relationship</th>
+					<th>End Node</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data will be inserted dynamically here -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+   
+    <script>
+        let offset = 0; // Tracks the number of nodes loaded
+        const limit = 5; // Number of nodes to load per request
+
+        function loadGraph(query) {
+            fetch('/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ query, limit, offset })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+				
+
+                const cyContainer = document.getElementById('cy');
+				const sortedNodes = data.nodes.sort((a, b) => (b.weight || 0) - (a.weight || 0));
+
+                if (offset === 0) {
+                    // Initialize Cytoscape for the first load
+                    window.cy = cytoscape({
+                        container: cyContainer,
+                        elements: [
+                            ...sortedNodes.map(node => ({
+                                data: { id: node.id, label: node.name || node.title || node.id,weight:node.weight||0, ...node }
+                            })),
+                            ...data.relationships.map(rel => ({
+                                data: { source: rel.source, target: rel.target, label: rel.type }
+                            }))
+                        ],
+                        style: [
+                            {
+                                selector: 'node',
+                                style: {
+                                    'label': 'data(label)',
+                                    'background-color': '#0074D9',
+                                    'color': '#000',
+                                    'text-valign': 'center',
+                                    'text-halign': 'center'
+                                }
+                            },
+                            {
+                                selector: 'edge',
+                                style: {
+                                    'label': 'data(label)',
+                                    'width': 2,
+                                    'line-color': '#FF851B',
+                                    'target-arrow-color': '#FF851B',
+                                    'target-arrow-shape': 'triangle',
+									'label': '', // Start with empty label
+                                    'text-opacity': 0 
+                                }
+                            },
+							 {
+                                selector: 'edge.hover',
+                                style: {
+                                    'label': 'data(label)', // Show label on hover
+                                    'text-opacity': 1,
+                                    'z-index': 999,
+                                    'font-size': '14px',
+                                    'color': '#000',
+                                    'text-background-color': '#fff',
+                                    'text-background-opacity': 1,
+                                    'text-background-padding': '2px'
+                                }
+                            }
+                        ],
+                        layout: {
+                            name: 'cose',
+                            animate: true
+                        }
+						
+                    });
+					 cy.on('mouseover', 'edge', function(e) {
+                        e.target.addClass('hover');
+                    });
+
+                    cy.on('mouseout', 'edge', function(e) {
+                        e.target.removeClass('hover');
+                    });
+					updateGraphTable(cy);
+
+                    addWeightSettingFunctionality(); // Add weight functionality to nodes
+                } else {
+                    // Add more elements to the existing graph
+                    const newElements = [
+                        ...sortedNodes.map(node => ({ data: { id: node.id, label: node.name || node.title || node.id, ...node } })),
+                        ...data.relationships.map(rel => ({ data: { source: rel.source, target: rel.target, label: rel.type } }))
+                    ];
+					
+                    window.cy.add(newElements);
+                }
+				updateGraphTable(cy);
+                offset += data.nodes.length;	
+				document.getElementById('uploadButton').addEventListener('click', () => {
+    fetch('/upload_csv')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Upload window opened successfully!');
+            } else {
+                alert('Failed to open upload window.');
+            }
+        })
+        .catch(error => console.error('Error:', error));
+});
+
+
+				 
+                // Disable "Load More" button if no more nodes
+                const loadMoreButton = document.getElementById('loadMoreButton');
+                if (data.nodes.length < limit) {
+                    loadMoreButton.disabled = true;
+                } else {
+                    loadMoreButton.disabled = false;
+                }
+
+                // Add hover event to display node details
+                window.cy.on('mouseover', 'node', function (evt) {
+                    const nodeData = evt.target.data();
+                    const detailsDiv = document.getElementById('nodeDetails');
+                    detailsDiv.innerHTML = `
+                        <strong>ID:</strong> ${nodeData.id}<br>
+                        ${Object.keys(nodeData)
+                            .filter(key => !['id', 'source', 'target', 'label'].includes(key))
+                            .map(key =>  `<strong>${key}:</strong> ${nodeData[key]}<br>`)
+                            .join('')}
+                    `;
+                });
+
+                // Clear details when not hovering over a node
+                window.cy.on('mouseout', 'node', function () {
+                    const detailsDiv = document.getElementById('nodeDetails');
+                    detailsDiv.innerHTML = 'Hover over a node to see its details.';
+                });
+
+                function updateGraphTable(cy) {
+    if (!cy || typeof cy.nodes !== "function") {
+        console.error("Cytoscape instance is not initialized properly.");
+        return;
+    }
+
+    let tableBody = document.querySelector("#graphTable tbody");
+    tableBody.innerHTML = ""; // Clear previous data
+    
+    let addedRelationships = new Set(); // To prevent duplicate relationships
+
+    cy.edges().forEach(edge => {
+        let sourceNode = edge.source();
+        let targetNode = edge.target();
+        let relationship = edge.data("label") || "Connected to";
+        
+        // Create unique identifier for this relationship
+        let relationshipId = `${sourceNode.id()}-${targetNode.id()}-${relationship}`;
+        
+        if (!addedRelationships.has(relationshipId)) {
+            // Get node names instead of IDs
+            let sourceName = sourceNode.data("label") || sourceNode.id();
+            let targetName = targetNode.data("label") || targetNode.id();
+            
+            let row = `<tr>
+                <td>${sourceName}</td>
+                <td>${relationship}</td>
+                <td>${targetName}</td>
+            </tr>`;
+            tableBody.innerHTML += row;
+            
+            addedRelationships.add(relationshipId);
+        }
+    });
+}
+                
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+      function addWeightSettingFunctionality() {
+    cy.on('tap', 'node', function (evt) {
+        const nodeData = evt.target.data();
+        const existingMenu = document.getElementById('nodeMenu');
+        if (existingMenu) existingMenu.remove();
+
+        const menuHtml = `
+            <div id="nodeMenu" style="position: absolute; left: ${evt.renderedPosition.x}px; top: ${evt.renderedPosition.y}px; background: white; border: 1px solid #ccc; padding: 10px; z-index: 1000;">
+                <p><strong>Node ID:</strong> ${nodeData.id}</p>
+                <button id="setWeightButton">Set Weight</button>
+                <button id="exploreNodeButton">Explore Node</button>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', menuHtml);
+
+        document.getElementById('setWeightButton').addEventListener('click', () => {
+            showWeightForm(nodeData, evt.renderedPosition);
+        });
+
+        document.getElementById('exploreNodeButton').addEventListener('click', () => {
+            exploreNode(nodeData.id);
+            document.getElementById('nodeMenu').remove();
+        });
+    });
+
+    cy.on('tap', (evt) => {
+        if (!evt.target.isNode) {
+            const nodeMenu = document.getElementById('nodeMenu');
+            if (nodeMenu) {
+                nodeMenu.remove();
+            }
+        }
+    });
+}
+
+function showWeightForm(nodeData, position) {
+    const existingForm = document.getElementById('weightForm');
+    if (existingForm) existingForm.remove();
+
+    const weightFormHtml = `
+        <div id="weightForm" style="position: absolute; left: ${position.x}px; top: ${position.y}px;">
+            <h4>Set Weight</h4>
+            <input type="number" id="weightInput" value="${nodeData.weight || 0}" />
+            <button id="saveWeightButton">Save</button>
+            <button id="cancelWeightButton">Cancel</button>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', weightFormHtml);
+
+    document.getElementById('saveWeightButton').addEventListener('click', () => {
+        const newWeight = parseInt(document.getElementById('weightInput').value, 10);
+        updateNodeWeight(nodeData.id, newWeight);
+        document.getElementById('weightForm').remove();
+    });
+
+    document.getElementById('cancelWeightButton').addEventListener('click', () => {
+        document.getElementById('weightForm').remove();
+    });
+}
+
+function exploreNode(nodeId) {
+    fetch('/explore_node', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_id: nodeId })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+
+        // Prevent duplicate nodes from being added
+        function nodeExists(nodeId) {
+            return cy.getElementById(nodeId).length > 0;
+        }
+
+        const newElements = [
+            ...data.nodes
+                .filter(node => !nodeExists(node.id)) // Avoid adding existing nodes
+                .map(node => ({ data: { id: node.id, label: node.name || node.id, weight: node.weight || 0, ...node } })),
+            ...data.relationships
+                .filter(rel => !cy.edges(`[source = "${rel.source}"][target = "${rel.target}"]`).length) // Avoid duplicate edges
+                .map(rel => ({ data: { source: rel.source, target: rel.target, label: rel.type } }))
+        ];
+		
+        cy.add(newElements); // Add new nodes/edges without clearing old ones
+
+        cy.layout({ name: 'cose', animate: true }).run(); // Maintain layout
+    })
+    .catch(error => console.error('Error:', error));
+}
+
+
+
+        function updateNodeWeight(nodeId, weight) {
+			const databaseName = "classs"
+		
+            fetch('/update_weight', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ node_id: nodeId, weight, database_name: databaseName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Weight updated successfully!');
+                    const node = cy.getElementById(nodeId);
+                    node.data('weight', weight);
+                } else {
+                    alert('Failed to update weight.');
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+        document.getElementById('searchButton').addEventListener('click', () => {
+            offset = 0;
+            const query = document.getElementById('searchBox').value;
+            loadGraph(query);
+        });
+
+        document.getElementById('loadMoreButton').addEventListener('click', () => {
+            const query = document.getElementById('searchBox').value;
+            loadGraph(query);
+        });
+		
+		document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("findPathButton").addEventListener("click", fetchPaths);
+});
+
+		
+		function fetchWithTimeout(url, options, timeout = 10000) {
+    return Promise.race([
+        fetch(url, options),
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Request timed out")), timeout)
+        )
+    ]);
+}
+
+
+    function fetchPaths() {
+            let node1 = document.getElementById("node1Input").value;  // Example start
+            let node2 = document.getElementById("node2Input").value;
+  // Example end
+			const cyContainer = document.getElementById("cy");
+			cyContainer.style.opacity = "0.5";
+            fetch("/find_path", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ node1, node2 })
+            })
+           .then(response => {
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        cyContainer.style.opacity = "1";
+        
+        if (data.error) {
+            let errorMessage = data.error;
+            if (errorMessage.includes("MemoryPoolOutOfMemoryError")) {
+                errorMessage = "The path search was too complex. Try searching for nodes that are more directly connected.";
+            }
+            alert(errorMessage);
+            return;
+        }
+
+        if (!data.paths || data.paths.length === 0) {
+            alert("No paths found between these nodes");
+            return;
+        }
+
+        visualizeGraph(data.paths);
+    })
+    .catch(error => {
+        cyContainer.style.opacity = "1";
+        console.error("Error:", error);
+        alert("Failed to find paths: " + error.message);
+    });
+}
+
+        function visualizeGraph(paths) {
+    if (!paths || !Array.isArray(paths) || paths.length === 0) {
+        alert("No paths found!");
+        return;
+    }
+
+    const elements = [];
+    const nodeSet = new Set();
+    const batchSize = 5; // Process 5 paths at a time
+    let currentBatch = 0;
+
+    function processBatch() {
+        const start = currentBatch * batchSize;
+        const end = Math.min(start + batchSize, paths.length);
+        
+        for (let i = start; i < end; i++) {
+            const path = paths[i];
+            if (!path.nodes || !path.relationships) {
+                console.error("Invalid path structure:", path);
+                continue;
+            }
+
+            // Add nodes
+            path.nodes.forEach(node => {
+                if (!nodeSet.has(node.id)) {
+                    elements.push({ 
+                        data: { 
+                            id: node.id, 
+                            label: node.properties.name,
+							attributes: node.properties,
+                            type: node.labels[0] // Add node type if available
+                        }
+                    });
+                    nodeSet.add(node.id);
+                }
+            });
+
+            // Add relationships
+            path.relationships.forEach(rel => {
+                elements.push({ 
+                    data: { 
+                        id: rel.id, 
+                        source: rel.node1, 
+                        target: rel.node2, 
+                        label: rel.type
+                    },
+                    classes: i === 0 ? "shortest" : ""  // Highlight first path
+                });
+            });
+        }
+
+        // Initialize or update cytoscape
+        if (currentBatch === 0) {
+            initializeCytoscape(elements);
+        } else {
+            cy.add(elements);
+            cy.layout({ name: 'dagre' }).run();
+        }
+
+        // Process next batch if available
+        currentBatch++;
+        if (currentBatch * batchSize < paths.length) {
+            setTimeout(processBatch, 100); // Add delay between batches
+        }
+    }
+
+    processBatch();
+}
+function displayNodeDetails(node) {
+    const detailsPanel = document.getElementById("nodeDetails");
+    if (!detailsPanel) {
+        console.error("Element with ID 'nodeDetails' not found!");
+        return;
+    }
+
+    const properties = node.data();
+    let content = "<strong>Node Details</strong><br>";
+
+    Object.entries(properties).forEach(([key, value]) => {
+        content += `<strong>${key}:</strong> ${value || "N/A"}<br>`;
+    });
+
+    detailsPanel.innerHTML = content;
+}
+
+// Function to initialize Cytoscape
+function initializeCytoscape(elements) {
+    const cy = cytoscape({
+        container: document.getElementById("cy"),
+        elements: elements,
+        style: [
+            {
+                selector: "node",
+                style: {
+                    "background-color": "#007bff",
+                    "label": function(ele) { return ele.data("label") || "No Label"; },
+                    "text-valign": "center",
+                    "text-halign": "center",
+                    "width": function(ele) { return ele.data("size") || "40px"; },
+                    "height": function(ele) { return ele.data("size") || "40px"; }
+                }
+            },
+            {
+                selector: "edge",
+                style: {
+                    "width": 2,
+                    "line-color": "#666",
+                    "target-arrow-color": "#666",
+                    "target-arrow-shape": "triangle",
+                    "curve-style": "bezier",
+                    "label":  function(ele) { return ele.data("label") || "No Label"; },
+                    "text-opacity": 0
+                }
+            },
+            {
+                selector: ".hovered-edge",
+                style: {
+                    "label": "data(label)", 
+                    "text-opacity": 1,
+                    "font-size": "14px",
+                    "color": "#000",
+                    "text-background-color": "#fff",
+                    "text-background-opacity": 1,
+                    "text-background-padding": "2px"
+                }
+            },
+            {
+                selector: '.shortest',
+                style: {
+                    'line-color': '#28a745',
+                    'target-arrow-color': '#28a745',
+                    'width': 3
+                }
+            }
+        ],
+        layout: {
+            name: "dagre",
+            rankDir: "LR",
+            padding: 50,
+            spacingFactor: 1.5
+        }
+    });
+
+    window.cy = cy;
+
+  cy.on("mouseover", "node", function (evt) {
+    const node = evt.target;
+    console.log("Node Data:", node.data()); // ✅ Debugging step
+
+    const detailsDiv = document.getElementById("nodeDetails");
+    if (!detailsDiv) {
+        console.error("Element with ID 'nodeDetails' not found!");
+        return;
+    }
+
+    const properties = node.data().attributes || node.data(); // ✅ Try both levels
+
+    detailsDiv.innerHTML = `
+        <strong>Node Details</strong><br>
+        <strong>ID:</strong> ${node.id()}<br>
+        ${Object.entries(properties)
+            .map(([key, value]) => `<strong>${key}:</strong> ${value}<br>`)
+            .join('')}
+    `;
+});
+
+
+    cy.on("mouseout", "node", function () {
+        document.getElementById("nodeDetails").innerHTML = "Hover over a node to see its details.";
+    });
+
+    cy.on("mouseover", "edge", function (event) {
+        event.target.addClass("hovered-edge");
+    });
+
+    cy.on("mouseout", "edge", function (event) {
+        event.target.removeClass("hovered-edge");
+    });
+}
+
+
+
+		
+    </script>
+</body>
+</html>
